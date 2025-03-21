@@ -15,7 +15,7 @@ DATABASE = 'faucet.db'
 MONAD_AMOUNT = 0.001
 TIME_LIMIT = 24 * 60 * 60  # 24 hours
 
-# Load secrets from environment
+# Load secrets from environment variables
 RECAPTCHA_SECRET = os.getenv('RECAPTCHA_SECRET')
 FAUCET_PRIVATE_KEY = os.getenv('PRIVATE_KEY')
 MONAD_RPC_URL = os.getenv('MONAD_RPC_URL', 'https://testnet-rpc.monad.xyz')
@@ -25,7 +25,7 @@ CHAIN_ID = int(os.getenv('CHAIN_ID', 999))
 w3 = Web3(Web3.HTTPProvider(MONAD_RPC_URL))
 FAUCET_ADDRESS = Account.from_key(FAUCET_PRIVATE_KEY).address
 
-# HTML with green CSS + header/footer + updated site key
+# HTML form with green styling + header/footer + reCAPTCHA site key
 HTML_FORM = '''
 <!DOCTYPE html>
 <html>
@@ -87,7 +87,7 @@ HTML_FORM = '''
 </html>
 '''
 
-# Initialize the database
+# Initialize database
 def init_db():
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
@@ -99,7 +99,7 @@ def init_db():
 def get_client_ip():
     return request.headers.get('X-Forwarded-For', request.remote_addr)
 
-# Validate Ethereum address
+# Validate address
 def is_valid_address(addr):
     return re.match(r'^0x[a-fA-F0-9]{40}$', addr)
 
@@ -146,10 +146,11 @@ def send_monad(address, amount):
         signed_tx = w3.eth.account.sign_transaction(tx, FAUCET_PRIVATE_KEY)
         tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
         print(f"Sent {amount} MONAD to {address}, tx: {tx_hash.hex()}")
-        return True
+        return True, f'Transaction sent: {tx_hash.hex()}'
     except Exception as e:
-        print(f"Error sending MONAD: {e}")
-        return False
+        error_msg = f"Error sending MONAD: {e}"
+        print(error_msg)
+        return False, error_msg
 
 @app.route('/', methods=['GET'])
 def index():
@@ -170,11 +171,12 @@ def faucet():
     if not can_request(ip):
         return jsonify({'error': 'Only 1 request per 24 hrs'}), 429
 
-    if send_monad(address, MONAD_AMOUNT):
+    success, message = send_monad(address, MONAD_AMOUNT)
+    if success:
         record_request(ip, address)
         return jsonify({'success': f'Sent {MONAD_AMOUNT} MONAD to {address}'}), 200
     else:
-        return jsonify({'error': 'Faucet failed'}), 500
+        return jsonify({'error': message}), 500
 
 if __name__ == '__main__':
     init_db()
