@@ -5,6 +5,7 @@ import os
 import re
 import requests
 from web3 import Web3
+from eth_account import Account  # FIXED import
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -18,13 +19,13 @@ TIME_LIMIT = 24 * 60 * 60  # 24 hours
 RECAPTCHA_SECRET = os.getenv('RECAPTCHA_SECRET')
 FAUCET_PRIVATE_KEY = os.getenv('PRIVATE_KEY')
 MONAD_RPC_URL = os.getenv('MONAD_RPC_URL', 'https://testnet-rpc.monad.xyz')
-CHAIN_ID = int(os.getenv('CHAIN_ID', 999))  # Default chain ID; replace if needed
+CHAIN_ID = int(os.getenv('CHAIN_ID', 999))  # Replace 999 if needed
 
 # Web3 setup
 w3 = Web3(Web3.HTTPProvider(MONAD_RPC_URL))
-FAUCET_ADDRESS = w3.eth.account.privateKeyToAccount(FAUCET_PRIVATE_KEY).address
+FAUCET_ADDRESS = Account.from_key(FAUCET_PRIVATE_KEY).address  # FIXED here
 
-# HTML form with your reCAPTCHA site key
+# HTML form with your reCAPTCHA Site Key already added
 HTML_FORM = '''
 <!DOCTYPE html>
 <html>
