@@ -26,7 +26,7 @@ CHAIN_ID = int(os.getenv('CHAIN_ID', 999))
 w3 = Web3(Web3.HTTPProvider(MONAD_RPC_URL))
 FAUCET_ADDRESS = Account.from_key(FAUCET_PRIVATE_KEY).address
 
-# HTML with donation + recent claims
+# HTML template
 HTML_FORM = '''
 <!DOCTYPE html>
 <html>
@@ -130,28 +130,35 @@ def init_db():
 def get_client_ip():
     return request.headers.get('X-Forwarded-For', request.remote_addr)
 
-# Validate address
+# Validate wallet address
 def is_valid_address(addr):
     return re.match(r'^0x[a-fA-F0-9]{40}$', addr)
 
-# Check cooldown for IP and address
+# Check cooldown per IP and wallet
 def can_request(ip, address):
+    now = int(time.time())
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
+
+    # Check last request by IP
     cursor.execute("SELECT timestamp FROM requests WHERE ip=? ORDER BY timestamp DESC LIMIT 1", (ip,))
     ip_row = cursor.fetchone()
+
+    # Check last request by wallet address
     cursor.execute("SELECT timestamp FROM requests WHERE address=? ORDER BY timestamp DESC LIMIT 1", (address,))
     addr_row = cursor.fetchone()
+
     conn.close()
 
-    now = int(time.time())
+    # Check IP cooldown
     if ip_row and now - ip_row[0] < TIME_LIMIT:
         return False
+    # Check wallet cooldown
     if addr_row and now - addr_row[0] < TIME_LIMIT:
         return False
     return True
 
-# Record request
+# Record new request
 def record_request(ip, address):
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
@@ -160,7 +167,7 @@ def record_request(ip, address):
     conn.commit()
     conn.close()
 
-# Get recent claims
+# Get recent 10 claims
 def get_recent_claims(limit=10):
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
@@ -169,7 +176,7 @@ def get_recent_claims(limit=10):
     conn.close()
     return [row[0] for row in rows]
 
-# Verify reCAPTCHA
+# Verify Google reCAPTCHA
 def verify_recaptcha(token):
     url = 'https://www.google.com/recaptcha/api/siteverify'
     payload = {'secret': RECAPTCHA_SECRET, 'response': token}
@@ -177,7 +184,7 @@ def verify_recaptcha(token):
     result = response.json()
     return result.get('success', False)
 
-# Send MONAD
+# Send MONAD transaction
 def send_monad(address, amount):
     try:
         nonce = w3.eth.get_transaction_count(FAUCET_ADDRESS)
@@ -195,11 +202,13 @@ def send_monad(address, amount):
     except Exception as e:
         return False, f"Error sending MONAD: {e}"
 
+# Route: Home
 @app.route('/', methods=['GET'])
 def index():
     recent_claims = get_recent_claims()
     return render_template_string(HTML_FORM, faucet_donation_address=FAUCET_DONATION_ADDRESS, recent_claims=recent_claims)
 
+# Route: Faucet Claim
 @app.route('/faucet', methods=['POST'])
 def faucet():
     address = request.form.get('address')
