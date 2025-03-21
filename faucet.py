@@ -5,7 +5,7 @@ import os
 import re
 import requests
 from web3 import Web3
-from eth_account import Account  # FIXED import
+from eth_account import Account
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,28 +19,70 @@ TIME_LIMIT = 24 * 60 * 60  # 24 hours
 RECAPTCHA_SECRET = os.getenv('RECAPTCHA_SECRET')
 FAUCET_PRIVATE_KEY = os.getenv('PRIVATE_KEY')
 MONAD_RPC_URL = os.getenv('MONAD_RPC_URL', 'https://testnet-rpc.monad.xyz')
-CHAIN_ID = int(os.getenv('CHAIN_ID', 999))  # Replace 999 if needed
+CHAIN_ID = int(os.getenv('CHAIN_ID', 999))
 
 # Web3 setup
 w3 = Web3(Web3.HTTPProvider(MONAD_RPC_URL))
-FAUCET_ADDRESS = Account.from_key(FAUCET_PRIVATE_KEY).address  # FIXED here
+FAUCET_ADDRESS = Account.from_key(FAUCET_PRIVATE_KEY).address
 
-# HTML form with your reCAPTCHA Site Key already added
+# HTML with green CSS + header/footer + updated site key
 HTML_FORM = '''
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Monad Testnet Faucet</title>
+    <title>Monad Faucet</title>
+    <style>
+        body {
+            background-color: #e6ffe6;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 50px;
+        }
+        h1 {
+            color: #006600;
+        }
+        form {
+            background-color: #ccffcc;
+            padding: 20px;
+            border-radius: 10px;
+            display: inline-block;
+        }
+        input[type=text] {
+            width: 300px;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #006600;
+            border-radius: 5px;
+        }
+        input[type=submit] {
+            background-color: #009900;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        input[type=submit]:hover {
+            background-color: #007700;
+        }
+        footer {
+            margin-top: 50px;
+            color: #004d00;
+        }
+    </style>
     <script src="https://www.google.com/recaptcha/api.js" async defer></script>
 </head>
 <body>
-    <h2>Monad Testnet Faucet</h2>
+    <h1>Monad Faucet</h1>
     <form action="/faucet" method="post">
-        <label for="address">Monad Address:</label><br>
+        <label for="address"><strong>Monad Address:</strong></label><br>
         <input type="text" id="address" name="address" required><br><br>
-        <div class="g-recaptcha" data-sitekey="6Lcv-fsqAAAAANv9Z8469ozh9P3vJJzNN24eqPPj"></div><br>
+        <div class="g-recaptcha" data-sitekey="6Lfz_vsqAAAAAFm_GR5ahhaMxFHnrQuDHgEC1F2F"></div><br>
         <input type="submit" value="Request 0.001 MONAD">
     </form>
+    <footer>
+        ©Andrenator
+    </footer>
 </body>
 </html>
 '''
