@@ -14,8 +14,9 @@ app = Flask(__name__)
 DATABASE = 'faucet.db'
 MONAD_AMOUNT = 0.001
 TIME_LIMIT = 24 * 60 * 60  # 24 hours
+FAUCET_DONATION_ADDRESS = "0x28EabC0E86e185E0FEe9ee14E94b1e619429B2B4"
 
-# Load secrets from environment variables
+# Load secrets from environment
 RECAPTCHA_SECRET = os.getenv('RECAPTCHA_SECRET')
 FAUCET_PRIVATE_KEY = os.getenv('PRIVATE_KEY')
 MONAD_RPC_URL = os.getenv('MONAD_RPC_URL', 'https://testnet-rpc.monad.xyz')
@@ -25,7 +26,7 @@ CHAIN_ID = int(os.getenv('CHAIN_ID', 999))
 w3 = Web3(Web3.HTTPProvider(MONAD_RPC_URL))
 FAUCET_ADDRESS = Account.from_key(FAUCET_PRIVATE_KEY).address
 
-# HTML form with green styling + header/footer + reCAPTCHA site key
+# HTML with donation + recent claims
 HTML_FORM = '''
 <!DOCTYPE html>
 <html>
@@ -65,6 +66,17 @@ HTML_FORM = '''
         input[type=submit]:hover {
             background-color: #007700;
         }
+        .donation {
+            margin-top: 20px;
+            color: #004d00;
+            font-size: 14px;
+            word-wrap: break-word;
+        }
+        .recent {
+            margin-top: 30px;
+            color: #003300;
+            font-size: 14px;
+        }
         footer {
             margin-top: 50px;
             color: #004d00;
@@ -80,6 +92,23 @@ HTML_FORM = '''
         <div class="g-recaptcha" data-sitekey="6Lfz_vsqAAAAAFm_GR5ahhaMxFHnrQuDHgEC1F2F"></div><br>
         <input type="submit" value="Request 0.001 MONAD">
     </form>
+    <div class="donation">
+        <p><strong>Support this faucet by donating MONAD!</strong></p>
+        <p>Faucet Address:</p>
+        <p>{{ faucet_donation_address }}</p>
+    </div>
+    <div class="recent">
+        <h3>Recent Claims</h3>
+        {% if recent_claims %}
+            <ul>
+                {% for addr in recent_claims %}
+                    <li>{{ addr }}</li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p>No recent claims yet.</p>
+        {% endif %}
+    </div>
     <footer>
         ©Andrenator
     </footer>
@@ -91,7 +120,9 @@ HTML_FORM = '''
 def init_db():
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS requests (ip TEXT, address TEXT, timestamp INTEGER)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS requests (
+        ip TEXT, address TEXT, timestamp INTEGER
+    )''')
     conn.commit()
     conn.close()
 
@@ -103,25 +134,40 @@ def get_client_ip():
 def is_valid_address(addr):
     return re.match(r'^0x[a-fA-F0-9]{40}$', addr)
 
-# Check rate limit
-def can_request(ip):
+# Check cooldown for IP and address
+def can_request(ip, address):
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
     cursor.execute("SELECT timestamp FROM requests WHERE ip=? ORDER BY timestamp DESC LIMIT 1", (ip,))
-    row = cursor.fetchone()
+    ip_row = cursor.fetchone()
+    cursor.execute("SELECT timestamp FROM requests WHERE address=? ORDER BY timestamp DESC LIMIT 1", (address,))
+    addr_row = cursor.fetchone()
     conn.close()
-    if row:
-        last_time = row[0]
-        return (int(time.time()) - last_time) > TIME_LIMIT
+
+    now = int(time.time())
+    if ip_row and now - ip_row[0] < TIME_LIMIT:
+        return False
+    if addr_row and now - addr_row[0] < TIME_LIMIT:
+        return False
     return True
 
 # Record request
 def record_request(ip, address):
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO requests (ip, address, timestamp) VALUES (?, ?, ?)", (ip, address, int(time.time())))
+    cursor.execute("INSERT INTO requests (ip, address, timestamp) VALUES (?, ?, ?)",
+                   (ip, address, int(time.time())))
     conn.commit()
     conn.close()
+
+# Get recent claims
+def get_recent_claims(limit=10):
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT address FROM requests ORDER BY timestamp DESC LIMIT ?", (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [row[0] for row in rows]
 
 # Verify reCAPTCHA
 def verify_recaptcha(token):
@@ -131,7 +177,7 @@ def verify_recaptcha(token):
     result = response.json()
     return result.get('success', False)
 
-# Send MONAD tokens
+# Send MONAD
 def send_monad(address, amount):
     try:
         nonce = w3.eth.get_transaction_count(FAUCET_ADDRESS)
@@ -144,17 +190,15 @@ def send_monad(address, amount):
             'chainId': CHAIN_ID
         }
         signed_tx = w3.eth.account.sign_transaction(tx, FAUCET_PRIVATE_KEY)
-        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)  # <- FIXED HERE
-        print(f"Sent {amount} MONAD to {address}, tx: {tx_hash.hex()}")
+        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
         return True, f'Transaction sent: {tx_hash.hex()}'
     except Exception as e:
-        error_msg = f"Error sending MONAD: {e}"
-        print(error_msg)
-        return False, error_msg
+        return False, f"Error sending MONAD: {e}"
 
 @app.route('/', methods=['GET'])
 def index():
-    return render_template_string(HTML_FORM)
+    recent_claims = get_recent_claims()
+    return render_template_string(HTML_FORM, faucet_donation_address=FAUCET_DONATION_ADDRESS, recent_claims=recent_claims)
 
 @app.route('/faucet', methods=['POST'])
 def faucet():
@@ -168,8 +212,8 @@ def faucet():
     if not recaptcha_token or not verify_recaptcha(recaptcha_token):
         return jsonify({'error': 'reCAPTCHA failed'}), 400
 
-    if not can_request(ip):
-        return jsonify({'error': 'Only 1 request per 24 hrs'}), 429
+    if not can_request(ip, address):
+        return jsonify({'error': 'Cooldown active for IP or address (24 hrs)'}), 429
 
     success, message = send_monad(address, MONAD_AMOUNT)
     if success:
