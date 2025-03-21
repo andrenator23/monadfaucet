@@ -144,7 +144,7 @@ def send_monad(address, amount):
             'chainId': CHAIN_ID
         }
         signed_tx = w3.eth.account.sign_transaction(tx, FAUCET_PRIVATE_KEY)
-        tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)  # <- FIXED HERE
         print(f"Sent {amount} MONAD to {address}, tx: {tx_hash.hex()}")
         return True, f'Transaction sent: {tx_hash.hex()}'
     except Exception as e:
