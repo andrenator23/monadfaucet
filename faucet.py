@@ -16,17 +16,14 @@ MONAD_AMOUNT = 0.001
 TIME_LIMIT = 24 * 60 * 60  # 24 hours
 FAUCET_DONATION_ADDRESS = "0x28EabC0E86e185E0FEe9ee14E94b1e619429B2B4"
 
-# Load secrets from environment
 RECAPTCHA_SECRET = os.getenv('RECAPTCHA_SECRET')
 FAUCET_PRIVATE_KEY = os.getenv('PRIVATE_KEY')
 MONAD_RPC_URL = os.getenv('MONAD_RPC_URL', 'https://testnet-rpc.monad.xyz')
 CHAIN_ID = int(os.getenv('CHAIN_ID', 999))
 
-# Web3 setup
 w3 = Web3(Web3.HTTPProvider(MONAD_RPC_URL))
 FAUCET_ADDRESS = Account.from_key(FAUCET_PRIVATE_KEY).address
 
-# HTML template
 HTML_FORM = '''
 <!DOCTYPE html>
 <html>
@@ -116,58 +113,53 @@ HTML_FORM = '''
 </html>
 '''
 
-# Initialize database
 def init_db():
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
     cursor.execute('''CREATE TABLE IF NOT EXISTS requests (
         ip TEXT, address TEXT, timestamp INTEGER
     )''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS cooldowns (
+        ip TEXT PRIMARY KEY, ip_timestamp INTEGER,
+        address TEXT UNIQUE, addr_timestamp INTEGER
+    )''')
     conn.commit()
     conn.close()
 
-# Get client IP
 def get_client_ip():
     return request.headers.get('X-Forwarded-For', request.remote_addr)
 
-# Validate wallet address
 def is_valid_address(addr):
     return re.match(r'^0x[a-fA-F0-9]{40}$', addr)
 
-# Check cooldown per IP and wallet
 def can_request(ip, address):
     now = int(time.time())
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
-
-    # Check last request by IP
-    cursor.execute("SELECT timestamp FROM requests WHERE ip=? ORDER BY timestamp DESC LIMIT 1", (ip,))
+    cursor.execute("SELECT ip_timestamp FROM cooldowns WHERE ip=?", (ip,))
     ip_row = cursor.fetchone()
 
-    # Check last request by wallet address
-    cursor.execute("SELECT timestamp FROM requests WHERE address=? ORDER BY timestamp DESC LIMIT 1", (address,))
+    cursor.execute("SELECT addr_timestamp FROM cooldowns WHERE address=?", (address,))
     addr_row = cursor.fetchone()
-
     conn.close()
 
-    # Check IP cooldown
     if ip_row and now - ip_row[0] < TIME_LIMIT:
         return False
-    # Check wallet cooldown
     if addr_row and now - addr_row[0] < TIME_LIMIT:
         return False
     return True
 
-# Record new request
 def record_request(ip, address):
+    now = int(time.time())
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO requests (ip, address, timestamp) VALUES (?, ?, ?)",
-                   (ip, address, int(time.time())))
+    cursor.execute("INSERT INTO requests (ip, address, timestamp) VALUES (?, ?, ?)", (ip, address, now))
+
+    cursor.execute("INSERT OR REPLACE INTO cooldowns (ip, ip_timestamp, address, addr_timestamp) VALUES (?, ?, ?, ?)",
+                   (ip, now, address, now))
     conn.commit()
     conn.close()
 
-# Get recent 10 claims
 def get_recent_claims(limit=10):
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
@@ -176,7 +168,6 @@ def get_recent_claims(limit=10):
     conn.close()
     return [row[0] for row in rows]
 
-# Verify Google reCAPTCHA
 def verify_recaptcha(token):
     url = 'https://www.google.com/recaptcha/api/siteverify'
     payload = {'secret': RECAPTCHA_SECRET, 'response': token}
@@ -184,7 +175,6 @@ def verify_recaptcha(token):
     result = response.json()
     return result.get('success', False)
 
-# Send MONAD transaction
 def send_monad(address, amount):
     try:
         nonce = w3.eth.get_transaction_count(FAUCET_ADDRESS)
@@ -202,13 +192,11 @@ def send_monad(address, amount):
     except Exception as e:
         return False, f"Error sending MONAD: {e}"
 
-# Route: Home
 @app.route('/', methods=['GET'])
 def index():
     recent_claims = get_recent_claims()
     return render_template_string(HTML_FORM, faucet_donation_address=FAUCET_DONATION_ADDRESS, recent_claims=recent_claims)
 
-# Route: Faucet Claim
 @app.route('/faucet', methods=['POST'])
 def faucet():
     address = request.form.get('address')
